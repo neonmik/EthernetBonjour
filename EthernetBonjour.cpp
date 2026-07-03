@@ -44,7 +44,7 @@ extern "C" {
 #define  MDNS_MAX_SERVICES_PER_PACKET  (16)
 
 // Uncomment to enable low-level parser tracing via Serial
-#define BONJOUR_DEBUG 1
+#define BONJOUR_DEBUG 0
 
 //#define  _BROKEN_MALLOC_   1
 #undef _USE_MALLOC_
