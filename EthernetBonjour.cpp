@@ -923,8 +923,33 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 
 									if (k < MDNS_MAX_SERVICES_PER_PACKET) {
 										int l = (int)dataLen - 2;	// -2: compressed service type suffix
-										if (l <= 0 || offset + (int)dataLen > (int)udp_len)
+										if (l < 0 || offset + (int)dataLen > (int)udp_len)
 											goto parseDone;
+
+										if (l == 0) {
+											// ponytail: bare compression pointer as PTR RDATA (Mio4 style).
+											// The entire RDATA is a 2-byte pointer to the instance name.
+											if (offset + 2 <= (int)udp_len && (udpBuffer[offset] & 0xC0) == 0xC0) {
+												uint16_t t = ((uint16_t)(udpBuffer[offset] & 0x3F) << 8) | udpBuffer[offset + 1];
+												if (t < (uint16_t)udp_len) {
+													uint8_t llen = udpBuffer[t];
+													if (llen > 0 && llen <= 63 && t + 1 + llen <= (uint16_t)udp_len) {
+														uint8_t* ptrName = (uint8_t*)my_malloc(llen + 1);
+														if (ptrName) {
+															memcpy(ptrName, udpBuffer + t + 1, llen);
+															ptrName[llen] = '\0';
+															ptrNames[k] = ptrName;
+															ptrOffsets[k] = t;	// pointer target for SRV matching
+															checkAARecords = 1;
+														}
+													}
+												}
+											}
+											offset += dataLen;
+											packetHandled = 1;
+											break;
+										}
+
 										uint8_t* ptrName = (uint8_t*)my_malloc(l);
 										if (ptrName) {
 											memcpy((uint8_t*)buf, udpBuffer + offset, 1);
