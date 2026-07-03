@@ -946,6 +946,11 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 						}
 					}
 				} else if (i >= qCnt + aCnt + aaCnt) {
+#if defined(BONJOUR_DEBUG) && BONJOUR_DEBUG
+					Serial.print(F("[Bonjour] add rec type=0x")); Serial.print(buf[1], HEX);
+					Serial.print(F(" fNPB=0x")); Serial.print(firstNamePtrByte, HEX);
+					Serial.print(F(" offset=")); Serial.println(offset);
+#endif
 					if (buf[1] == 0x21) {	// SRV record
 						for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
 							if (ptrNames[j] &&
@@ -957,6 +962,11 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 								break;
 							}
 						}
+#if defined(BONJOUR_DEBUG) && BONJOUR_DEBUG
+						Serial.print(F("[Bonjour]  SRV matched j=")); Serial.print(packetHandled ? j : -1);
+						Serial.print(F(" port=")); Serial.print(ptrPorts[packetHandled ? j : 0]);
+						Serial.print(F(" ptrIP=0x")); Serial.println(ptrIPs[packetHandled ? j : 0], HEX);
+#endif
 					} else if (buf[1] == 0x10) {	// TXT record
 						for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
 							if (ptrNames[j] &&
@@ -1028,8 +1038,9 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 				if (ptrNames[i]) {
 					Serial.print(' '); Serial.print(i);
 					Serial.print('='); Serial.print((const char*)ptrNames[i]);
+					Serial.print(" ptrOff=0x"); Serial.print(ptrOffsets[i], HEX);
 					Serial.print(" port="); Serial.print(ptrPorts[i]);
-					Serial.print(" ptrIP="); Serial.println(ptrIPs[i], HEX);
+					Serial.print(" ptrIP=0x"); Serial.println(ptrIPs[i], HEX);
 				}
 			for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++)
 				if (servIPKeys[j]) {
