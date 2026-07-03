@@ -79,6 +79,7 @@ private:
    MDNSDataInternal_t    _mdnsData;
    MDNSState_t           _state;
    uint8_t*             _bonjourName;
+   uint8_t*             _bonjourName2;  // ponytail: secondary hostname support
    MDNSServiceRecord_t* _serviceRecords[NumMDNSServiceRecords];
    unsigned long        _lastAnnounceMillis;
    
@@ -97,7 +98,7 @@ private:
 
    void _writeDNSName(const uint8_t* name, uint16_t* pPtr, uint8_t* buf, int bufSize,
                       int zeroTerminate);
-   void _writeMyIPAnswerRecord(uint16_t* pPtr, uint8_t* buf, int bufSize);
+   void _writeMyIPAnswerRecord(uint16_t* pPtr, uint8_t* buf, int bufSize, uint8_t* hostName);
    void _writeServiceRecordName(int recordIndex, uint16_t* pPtr, uint8_t* buf, int bufSize, int tld);
    void _writeServiceRecordPTR(int recordIndex, uint16_t* pPtr, uint8_t* buf, int bufSize,
                                uint32_t ttl);
@@ -124,7 +125,8 @@ public:
    void run();
    
    int setBonjourName(const char* bonjourName);
-   
+   int setSecondaryHostname(const char* secondaryName);
+
    int addServiceRecord(const char* name, uint16_t port, MDNSServiceProtocol_t proto);
    int addServiceRecord(const char* name, uint16_t port, MDNSServiceProtocol_t proto,
                         const char* textContent);

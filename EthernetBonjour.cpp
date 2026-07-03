@@ -41,7 +41,7 @@ extern "C" {
 #define  MDNS_SQUERY_RESEND_TIME (10000)	// 10 seconds, service query resend timeout
 #define  MDNS_RESPONSE_TTL       (120)		// two minutes (in seconds)
 
-#define  MDNS_MAX_SERVICES_PER_PACKET  (6)
+#define  MDNS_MAX_SERVICES_PER_PACKET  (16)
 
 //#define  _BROKEN_MALLOC_   1
 #undef _USE_MALLOC_
@@ -120,6 +120,7 @@ EthernetBonjourClass::EthernetBonjourClass()
 //   this->_sock = -1;
 
 	this->_bonjourName = NULL;
+	this->_bonjourName2 = NULL;
 	this->_resolveNames[0] = NULL;
 	this->_resolveNames[1] = NULL;
 
@@ -333,7 +334,9 @@ MDNSError_t EthernetBonjourClass::_sendMDNSMessage(uint32_t peerAddress, uint32_
 	// construct the answer section
 	switch (type) {
 		case MDNSPacketTypeMyIPAnswer: {
-			this->_writeMyIPAnswerRecord( &ptr, buf, sizeof(DNSHeader_t) );
+			// serviceRecord param is repurposed: 0=primary, 1=secondary hostname
+			uint8_t* hostName = (serviceRecord == 0) ? this->_bonjourName : this->_bonjourName2;
+			this->_writeMyIPAnswerRecord( &ptr, buf, sizeof(DNSHeader_t), hostName );
 			break;
 		}
 
@@ -426,7 +429,7 @@ MDNSError_t EthernetBonjourClass::_sendMDNSMessage(uint32_t peerAddress, uint32_
 						     MDNS_RESPONSE_TTL);
 
 			// finally, our IP address as additional record
-			this->_writeMyIPAnswerRecord( &ptr, buf, sizeof(DNSHeader_t) );
+			this->_writeMyIPAnswerRecord( &ptr, buf, sizeof(DNSHeader_t), this->_bonjourName );
 
 			break;
 		}
@@ -476,7 +479,7 @@ MDNSError_t EthernetBonjourClass::_sendMDNSMessage(uint32_t peerAddress, uint32_
 			ptr += 4;
 
 			// send our IPv4 address record as additional record, in case the peer wants it.
-			this->_writeMyIPAnswerRecord( &ptr, buf, sizeof(DNSHeader_t) );
+			this->_writeMyIPAnswerRecord( &ptr, buf, sizeof(DNSHeader_t), this->_bonjourName );
 
 			break;
 		}
@@ -512,13 +515,13 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 	uint8_t* buf;
 	uint32_t xid;
 	uint16_t udp_len, qCnt, aCnt, aaCnt, addCnt;
-	uint8_t recordsAskedFor[NumMDNSServiceRecords + 2];
+	uint8_t recordsAskedFor[NumMDNSServiceRecords + 3];
 	uint8_t recordsFound[2];
 	uint8_t wantsIPv6Addr = 0;
 	uint8_t * udpBuffer = NULL;
 	uintptr_t ptr;
 
-	memset( recordsAskedFor, 0, sizeof(uint8_t) * (NumMDNSServiceRecords + 2) );
+	memset( recordsAskedFor, 0, sizeof(uint8_t) * (NumMDNSServiceRecords + 3) );
 	memset(recordsFound, 0, sizeof(uint8_t) * 2);
 
 
@@ -566,26 +569,39 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 		// read over the query section
 		for (i = 0; i < qCnt; i++) {
 			// construct service name data structures for comparison
-			const uint8_t* servNames[NumMDNSServiceRecords + 2];
-			int servLens[NumMDNSServiceRecords + 2];
-			uint8_t servNamePos[NumMDNSServiceRecords + 2];
-			uint8_t servMatches[NumMDNSServiceRecords + 2];
+			const uint8_t* servNames[NumMDNSServiceRecords + 3];
+			int servLens[NumMDNSServiceRecords + 3];
+			uint8_t servNamePos[NumMDNSServiceRecords + 3];
+			uint8_t servMatches[NumMDNSServiceRecords + 3];
 
-			// first entry is our own MDNS name, the rest are our services
+			// first entry is our own MDNS name (primary)
 			servNames[0] = (const uint8_t*)this->_bonjourName;
 			servNamePos[0] = 0;
 			servLens[0] = strlen( (char*)this->_bonjourName );
 			servMatches[0] = 1;
 
-			// second entry is our own the general DNS-SD service
-			servNames[1] = (const uint8_t*)DNS_SD_SERVICE;
-			servNamePos[1] = 0;
-			servLens[1] = strlen( (char*)DNS_SD_SERVICE );
-			servMatches[1] = 1;
+			// second entry is secondary hostname (if set)
+			if (this->_bonjourName2 != NULL) {
+				servNames[1] = (const uint8_t*)this->_bonjourName2;
+				servNamePos[1] = 0;
+				servLens[1] = strlen( (char*)this->_bonjourName2 );
+				servMatches[1] = 1;
+			} else {
+				servNames[1] = NULL;
+				servNamePos[1] = 0;
+				servLens[1] = 0;
+				servMatches[1] = 0;
+			}
 
-			for (j = 2; j < NumMDNSServiceRecords + 2; j++)
-				if (NULL != this->_serviceRecords[j - 2] && NULL != this->_serviceRecords[j - 2]->servName) {
-					servNames[j] = this->_serviceRecords[j - 2]->servName;
+			// third entry is the general DNS-SD service
+			servNames[2] = (const uint8_t*)DNS_SD_SERVICE;
+			servNamePos[2] = 0;
+			servLens[2] = strlen( (char*)DNS_SD_SERVICE );
+			servMatches[2] = 1;
+
+			for (j = 3; j < NumMDNSServiceRecords + 3; j++)
+				if (NULL != this->_serviceRecords[j - 3] && NULL != this->_serviceRecords[j - 3]->servName) {
+					servNames[j] = this->_serviceRecords[j - 3]->servName;
 					servLens[j] = strlen( (char*)servNames[j] );
 					servMatches[j] = 1;
 					servNamePos[j] = 0;
@@ -611,7 +627,7 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 					memcpy( (uint8_t*)buf, (uint16_t*)(ptr + offset),1 );
 					offset += 1;
 
-					for (j = 0; j < NumMDNSServiceRecords + 2; j++) {
+					for (j = 0; j < NumMDNSServiceRecords + 3; j++) {
 						if (servNamePos[j] && servNamePos[j] != buf[0]) {
 							servMatches[j] = 0;
 						}
@@ -628,7 +644,7 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 						offset += ir;
 						tr -= ir;
 
-						for (j = 0; j < NumMDNSServiceRecords + 2; j++) {
+						for (j = 0; j < NumMDNSServiceRecords + 3; j++) {
 							if (!recordsAskedFor[j] && servMatches[j])
 								servMatches[j] &= this->_matchStringPart(&servNames[j], &servLens[j], buf,
 													 ir);
@@ -647,7 +663,7 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 			memcpy( (uint8_t*)buf, (uint16_t*)(ptr + offset),4 );
 			offset += 4;
 
-			for (j = 0; j < NumMDNSServiceRecords + 2; j++) {
+			for (j = 0; j < NumMDNSServiceRecords + 3; j++) {
 				if (!recordsAskedFor[j] && servNames[j] && servMatches[j] && 0 == servLens[j]) {
 					if (0 == servNamePos[j])
 						servNamePos[j] = offset - 4 - tLen;
@@ -655,9 +671,9 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 					if ( buf[0] == 0 && buf[3] == 0x01 &&
 					     (buf[2] == 0x00 || buf[2] == 0x80) ) {
 
-						if ( (0 == j && 0x01 == buf[1]) || ( 0 < j && (0x0c == buf[1] || 0x10 == buf[1] || 0x21 == buf[1]) ) )
+						if ( ((j == 0 || j == 1) && 0x01 == buf[1]) || ( j > 1 && (0x0c == buf[1] || 0x10 == buf[1] || 0x21 == buf[1]) ) )
 							recordsAskedFor[j] = 1;
-						else if (0 == j && 0x1c == buf[1])
+						else if ((j == 0 || j == 1) && 0x1c == buf[1])
 							wantsIPv6Addr = 1;
 					}
 				}
@@ -679,11 +695,16 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 		uint8_t* ptrNames[MDNS_MAX_SERVICES_PER_PACKET];
 		uint16_t ptrOffsets[MDNS_MAX_SERVICES_PER_PACKET];
 		uint16_t ptrPorts[MDNS_MAX_SERVICES_PER_PACKET];
-		uint8_t ptrIPs[MDNS_MAX_SERVICES_PER_PACKET];
-		uint8_t servIPs[MDNS_MAX_SERVICES_PER_PACKET][5];
+		uint16_t ptrIPs[MDNS_MAX_SERVICES_PER_PACKET];
+		uint16_t servIPKeys[MDNS_MAX_SERVICES_PER_PACKET];
+		uint8_t servIPs[MDNS_MAX_SERVICES_PER_PACKET][4];
 		uint8_t* servTxt[MDNS_MAX_SERVICES_PER_PACKET];
-		memset(servIPs, 0, sizeof(uint8_t) * MDNS_MAX_SERVICES_PER_PACKET * 5);
+		memset(servIPKeys, 0, sizeof(uint16_t) * MDNS_MAX_SERVICES_PER_PACKET);
+		memset(servIPs, 0, sizeof(uint8_t) * MDNS_MAX_SERVICES_PER_PACKET * 4);
 		memset(servTxt, 0, sizeof(uint8_t*) * MDNS_MAX_SERVICES_PER_PACKET);
+		memset(ptrPorts, 0, sizeof(uint16_t) * MDNS_MAX_SERVICES_PER_PACKET);
+		memset(ptrOffsets, 0, sizeof(uint16_t) * MDNS_MAX_SERVICES_PER_PACKET);
+		memset(ptrIPs, 0, sizeof(uint16_t) * MDNS_MAX_SERVICES_PER_PACKET);
 
 		const uint8_t* ptrNamesCmp[MDNS_MAX_SERVICES_PER_PACKET];
 		int ptrLensCmp[MDNS_MAX_SERVICES_PER_PACKET];
@@ -693,10 +714,10 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 		memset(ptrNames, 0, sizeof(uint8_t*) * MDNS_MAX_SERVICES_PER_PACKET);
 
 		const uint8_t* servNames[2];
-		uint8_t servNamePos[2];
+		uint16_t servNamePos[2];
 		int servLens[2];
 		uint8_t servMatches[2];
-		uint8_t firstNamePtrByte = 0;
+		uint16_t firstNamePtrByte = 0;
 		uint8_t partMatched[2];
 		uint8_t lastWasCompressed[2];
 		uint8_t servWasCompressed[2];
@@ -736,13 +757,15 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 				rLen = buf[0];
 				tLen += 1;
 
-				if (rLen > 128) {	// handle DNS name compression, kinda, sorta...
+				if (rLen > 128) {	// handle DNS name compression
 
 					memcpy( (uint8_t*)buf, (uint16_t*)(ptr + offset),1 );
 					offset += 1;
 
+					uint16_t compressedOffset = ((uint16_t)(rLen & 0x3F) << 8) | buf[0];
+
 					for (j = 0; j < 2; j++) {
-						if (servNamePos[j] && servNamePos[j] != buf[0])
+						if (servNamePos[j] && servNamePos[j] != compressedOffset)
 							servMatches[j] = 0;
 						else
 							servWasCompressed[j] = 1;
@@ -753,7 +776,7 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 					tLen += 1;
 
 					if (0 == firstNamePtrByte)
-						firstNamePtrByte = buf[0];
+						firstNamePtrByte = compressedOffset;
 				} else if (rLen > 0) {
 					if (i < qCnt)
 						offset += rLen;
@@ -814,7 +837,10 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 				offset += 4;
 				if (i < qCnt + aCnt) {
 					for (j = 0; j < 2; j++) {
-						if (0 == servNamePos[j])
+						// Only anchor the compression offset when we have a confirmed full match.
+						// Setting it on non-matching records corrupts pointer checks for later records
+						// (e.g. a Mio4 TXT record before PTR records would lock the wrong offset).
+						if (0 == servNamePos[j] && servMatches[j] && 0 == servLens[j])
 							servNamePos[j] = offset - 4 - tLen;
 
 						if ( servNames[j] &&
@@ -857,7 +883,7 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 											memcpy( (uint8_t*)ptrName, (uint16_t*)(ptr + offset + 1),l - 1 );
 
 											if (buf[0] < l - 1)
-												ptrName[buf[0]];// this catches uncompressed names
+												ptrName[buf[0]] = '\0';	// null-terminate uncompressed names
 											else
 												ptrName[l - 1] = '\0';
 
@@ -870,6 +896,30 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 								}
 								offset += dataLen;
 								packetHandled = 1;
+							}
+						}
+					}
+					// SRV records may appear in the answer section (non-standard but used by
+					// devices such as the iConnectivity Mio4). Handle them here too.
+					if (!packetHandled && buf[1] == 0x21) {
+						for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
+							if ( ptrNames[j] &&
+							     ( (firstNamePtrByte && firstNamePtrByte == ptrOffsets[j]) ||
+							       (0 == ptrLensCmp[j] && ptrNamesMatches[j]) ) ) {
+								memcpy( (uint8_t*)buf, (uint16_t*)(ptr + offset),6 );
+								offset += 6;
+								uint16_t dataLen = ethutil_ntohs(*(uint16_t*)&buf[4]);
+								if (dataLen >= 8) {
+									memcpy( (uint8_t*)buf, (uint16_t*)(ptr + offset),8 );
+									ptrPorts[j] = ethutil_ntohs(*(uint16_t*)&buf[4]);
+									if (buf[6] > 128)
+										ptrIPs[j] = ((uint16_t)(buf[6] & 0x3F) << 8) | buf[7];
+									else
+										ptrIPs[j] = (uint16_t)(offset + 6);
+								}
+								offset += dataLen;
+								packetHandled = 1;
+								break;
 							}
 						}
 					}
@@ -894,9 +944,9 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 									ptrPorts[j] = ethutil_ntohs(*(uint16_t*)&buf[4]);
 
 									if (buf[6] > 128) {	// target is a compressed name
-										ptrIPs[j] = buf[7];
+										ptrIPs[j] = ((uint16_t)(buf[6] & 0x3F) << 8) | buf[7];
 									} else {// target is uncompressed
-										ptrIPs[j] = offset + 6;
+										ptrIPs[j] = (uint16_t)(offset + 6);
 									}
 								}
 								offset += dataLen;
@@ -937,15 +987,15 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 						}
 					} else if (buf[1] == 0x01) {	// A record (IPv4 address)
 						for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
-							if (0 == servIPs[j][0]) {
-								servIPs[j][0] = firstNamePtrByte ? firstNamePtrByte : 255;
+							if (0 == servIPKeys[j]) {
+								servIPKeys[j] = firstNamePtrByte ? firstNamePtrByte : 0xFFFF;
 
 								memcpy( (uint8_t*)buf, (uint16_t*)(ptr + offset),6 );
 								offset += 6;
 
 								uint16_t dataLen = ethutil_ntohs(*(uint16_t*)&buf[4]);
 								if (4 == dataLen) {
-									memcpy( (uint8_t*)&servIPs[j][1], (uint16_t*)(ptr + offset),4 );
+									memcpy( (uint8_t*)servIPs[j], (uint16_t*)(ptr + offset),4 );
 								}
 								offset += dataLen;
 								packetHandled = 1;
@@ -979,14 +1029,12 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 					const uint8_t* fallbackIpAddr = NULL;
 
 					for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
-						if (servIPs[j][0] == ptrIPs[i] || servIPs[j][0] == 255) {
-							// the || part is such a hack, but it will work as long as there's only
-							// one A record per MDNS packet. fucking DNS name compression.
-							ipAddr = &servIPs[j][1];
+						if (servIPKeys[j] == ptrIPs[i] || servIPKeys[j] == 0xFFFF) {
+							ipAddr = servIPs[j];
 
 							break;
-						} else if (NULL == fallbackIpAddr && 0 != servIPs[j][0])
-							fallbackIpAddr = &servIPs[j][1];
+						} else if (NULL == fallbackIpAddr && 0 != servIPKeys[j])
+							fallbackIpAddr = servIPs[j];
 					}
 
 					// if we can't find a matching IP, we try to use the first one we found.
@@ -1025,16 +1073,18 @@ errorReturn:
 #endif
 
 	// now, handle the requests
-	for (j = 0; j < NumMDNSServiceRecords + 2; j++) {
+	for (j = 0; j < NumMDNSServiceRecords + 3; j++) {
 		if (recordsAskedFor[j]) {
-			if (0 == j)
+			if (j == 0)
 				(void)this->_sendMDNSMessage(this->remoteIP(), xid, (int)MDNSPacketTypeMyIPAnswer, 0);
-			else if (1 == j) {
-				uint8_t k = 2;
+			else if (j == 1)
+				(void)this->_sendMDNSMessage(this->remoteIP(), xid, (int)MDNSPacketTypeMyIPAnswer, 1);
+			else if (j == 2) {
+				uint8_t k = 3;
 				for (k = 0; k < NumMDNSServiceRecords; k++)
-					recordsAskedFor[k + 2] = 1;
-			} else if (NULL != this->_serviceRecords[j - 2])
-				(void)this->_sendMDNSMessage(this->remoteIP(), xid, (int)MDNSPacketTypeServiceRecord, j - 2);
+					recordsAskedFor[k + 3] = 1;
+			} else if (NULL != this->_serviceRecords[j - 3])
+				(void)this->_sendMDNSMessage(this->remoteIP(), xid, (int)MDNSPacketTypeServiceRecord, j - 3);
 		}
 	}
 
@@ -1122,6 +1172,27 @@ int EthernetBonjourClass::setBonjourName(const char* bonjourName)
 
 	strcpy( (char*)this->_bonjourName, bonjourName );
 	strcpy( (char*)this->_bonjourName + strlen(bonjourName), MDNS_TLD );
+
+	return 1;
+}
+
+// return values:
+// 1 on success
+// 0 otherwise
+int EthernetBonjourClass::setSecondaryHostname(const char* secondaryName)
+{
+	if (NULL == secondaryName)
+		return 0;
+
+	if (this->_bonjourName2 != NULL)
+		my_free(this->_bonjourName2);
+
+	this->_bonjourName2 = (uint8_t*)my_malloc(strlen(secondaryName) + 7);
+	if (NULL == this->_bonjourName2)
+		return 0;
+
+	strcpy( (char*)this->_bonjourName2, secondaryName );
+	strcpy( (char*)this->_bonjourName2 + strlen(secondaryName), MDNS_TLD );
 
 	return 1;
 }
@@ -1300,11 +1371,11 @@ void EthernetBonjourClass::_writeDNSName(const uint8_t* name, uint16_t* pPtr,
 	*pPtr = ptr;
 }
 
-void EthernetBonjourClass::_writeMyIPAnswerRecord(uint16_t* pPtr, uint8_t* buf, int bufSize)
+void EthernetBonjourClass::_writeMyIPAnswerRecord(uint16_t* pPtr, uint8_t* buf, int bufSize, uint8_t* hostName)
 {
 	uint16_t ptr = *pPtr;
 
-	this->_writeDNSName(this->_bonjourName, &ptr, buf, bufSize, 1);
+	this->_writeDNSName(hostName, &ptr, buf, bufSize, 1);
 
 	buf[0] = 0x00;
 	buf[1] = 0x01;
