@@ -704,6 +704,14 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 	         MDNS_SERVER_PORT == remotePort() &&
 	         (NULL != this->_resolveNames[0] || NULL != this->_resolveNames[1]))
 	{
+#if defined(BONJOUR_DEBUG) && BONJOUR_DEBUG
+		IPAddress rip = this->remoteIP();
+		Serial.print(F("[Bonjour] resp from "));
+		Serial.print(rip[0]); Serial.print('.'); Serial.print(rip[1]); Serial.print('.');
+		Serial.print(rip[2]); Serial.print('.'); Serial.print(rip[3]);
+		Serial.print(F(" aCnt=")); Serial.print(aCnt);
+		Serial.print(F(" addCnt=")); Serial.println(addCnt);
+#endif
 		int offset = sizeof(DNSHeader_t);
 		int rLen = 0, tLen = 0;
 
