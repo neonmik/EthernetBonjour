@@ -94,6 +94,7 @@ private:
 
    MDNSError_t _processMDNSQuery();
    MDNSError_t _sendMDNSMessage(uint32_t peerAddress, uint32_t xid, int type, int serviceRecord);
+   bool _parseSRVRecord(const uint8_t* pkt, int* pOffset, int pktLen, uint16_t* portOut, uint16_t* ipOut);
 
 
    void _writeDNSName(const uint8_t* name, uint16_t* pPtr, uint8_t* buf, int bufSize,
