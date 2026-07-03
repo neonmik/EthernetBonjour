@@ -1053,13 +1053,13 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 #endif
 
 			for (i = 0; i < MDNS_MAX_SERVICES_PER_PACKET; i++)
-				if (ptrNames[i] && ptrPorts[i] != 0) {
-					// ptrPorts[i] == 0 means no SRV was matched; skip delivery to avoid
-					// false positives (garbled alien PTR names, 0.0.0.0 from zero==zero match).
+				if (ptrNames[i]) {
 					const uint8_t* ipAddr = NULL;
 					const uint8_t* fallbackIpAddr = NULL;
 
 					for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
+						// ponytail: only match on ptrIPs[i] when SRV was found (non-zero);
+						// avoids false 0==0 match that produced 0.0.0.0 deliveries.
 						if (0 != ptrIPs[i] && (servIPKeys[j] == ptrIPs[i] || servIPKeys[j] == 0xFFFF)) {
 							ipAddr = servIPs[j];
 							break;
@@ -1067,7 +1067,9 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 							fallbackIpAddr = servIPs[j];
 					}
 
-					// if we can't match the SRV target to an A record, use the first A record found
+					// if we can't match SRV target to A record, use the first A record found.
+					// this covers devices that send PTR+A in one packet but SRV separately
+					// (or not at all). port will be 0; upper layer should supply a default.
 					if (NULL == ipAddr) ipAddr = fallbackIpAddr;
 
 					if (ipAddr && (ipAddr[0] || ipAddr[1] || ipAddr[2] || ipAddr[3])
