@@ -854,6 +854,12 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 				offset += 4;
 
 				if (i < qCnt + aCnt) {
+#if defined(BONJOUR_DEBUG) && BONJOUR_DEBUG
+					Serial.print(F("[Bonjour] ans rec type=0x")); Serial.print(buf[1], HEX);
+					Serial.print(F(" fNPB=0x")); Serial.print(firstNamePtrByte, HEX);
+					Serial.print(F(" sM=")); Serial.print(servMatches[1]);
+					Serial.print(F(" sL=")); Serial.println(servLens[1]);
+#endif
 					for (j = 0; j < 2; j++) {
 						// Only anchor the compression offset on a confirmed full match.
 						// Setting it on non-matching records corrupts pointer checks for later records
