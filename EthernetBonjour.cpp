@@ -43,6 +43,9 @@ extern "C" {
 
 #define  MDNS_MAX_SERVICES_PER_PACKET  (16)
 
+// Uncomment to enable low-level parser tracing via Serial
+#define BONJOUR_DEBUG 1
+
 //#define  _BROKEN_MALLOC_   1
 #undef _USE_MALLOC_
 
@@ -1019,13 +1022,34 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 				p++;
 			*p = '\0';
 
+#if defined(BONJOUR_DEBUG) && BONJOUR_DEBUG
+			Serial.print(F("[Bonjour] parseDone. PTR slots:"));
 			for (i = 0; i < MDNS_MAX_SERVICES_PER_PACKET; i++)
 				if (ptrNames[i]) {
+					Serial.print(' '); Serial.print(i);
+					Serial.print('='); Serial.print((const char*)ptrNames[i]);
+					Serial.print(" port="); Serial.print(ptrPorts[i]);
+					Serial.print(" ptrIP="); Serial.println(ptrIPs[i], HEX);
+				}
+			for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++)
+				if (servIPKeys[j]) {
+					Serial.print(F("[Bonjour] A-slot ")); Serial.print(j);
+					Serial.print(F(" key=0x")); Serial.print(servIPKeys[j], HEX);
+					Serial.print(F(" ip="));
+					for (uint8_t b = 0; b < 4; b++) { Serial.print(servIPs[j][b]); if (b<3) Serial.print('.'); }
+					Serial.println();
+				}
+#endif
+
+			for (i = 0; i < MDNS_MAX_SERVICES_PER_PACKET; i++)
+				if (ptrNames[i] && ptrPorts[i] != 0) {
+					// ptrPorts[i] == 0 means no SRV was matched; skip delivery to avoid
+					// false positives (garbled alien PTR names, 0.0.0.0 from zero==zero match).
 					const uint8_t* ipAddr = NULL;
 					const uint8_t* fallbackIpAddr = NULL;
 
 					for (j = 0; j < MDNS_MAX_SERVICES_PER_PACKET; j++) {
-						if (servIPKeys[j] == ptrIPs[i] || servIPKeys[j] == 0xFFFF) {
+						if (0 != ptrIPs[i] && (servIPKeys[j] == ptrIPs[i] || servIPKeys[j] == 0xFFFF)) {
 							ipAddr = servIPs[j];
 							break;
 						} else if (NULL == fallbackIpAddr && 0 != servIPKeys[j])
@@ -1035,7 +1059,8 @@ MDNSError_t EthernetBonjourClass::_processMDNSQuery()
 					// if we can't match the SRV target to an A record, use the first A record found
 					if (NULL == ipAddr) ipAddr = fallbackIpAddr;
 
-					if (ipAddr && this->_serviceFoundCallback) {
+					if (ipAddr && (ipAddr[0] || ipAddr[1] || ipAddr[2] || ipAddr[3])
+					    && this->_serviceFoundCallback) {
 						this->_serviceFoundCallback(typeName,
 						                            this->_resolveServiceProto,
 						                            (const char*)ptrNames[i],
